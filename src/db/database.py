@@ -1,22 +1,16 @@
 """
-Database configuration and base models.
+Database configuration and utility functions.
 
-This module provides the declarative base for SQLAlchemy models
-and utility functions for database operations.
+This module provides utility functions for database operations.
 All dependency injection is handled by Dishka in src/ioc.py.
+The Base class is defined in src/models/base.py.
 """
 
 from sqlalchemy.ext.asyncio import AsyncEngine
-from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy ORM models."""
-    pass
 
 
 async def check_db_connection(engine: AsyncEngine) -> bool:

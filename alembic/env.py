@@ -6,8 +6,8 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from src.db.database import Base
-from src.schemas.user import User  # Import all your models here
+from src.models.base import Base
+from src.models.auth import User, RefreshToken, RegistrationToken  # Import all your models here
 from src.core.config import Config
 
 

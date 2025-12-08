@@ -24,5 +24,6 @@ dependencies = [
     "python-json-logger>=4.0.0",
     "sqlalchemy>=2.0.43",
     "structlog>=25.4.0",
+    "python-ulid>=3.0.0",
     "uvicorn>=0.37.0",
 ]

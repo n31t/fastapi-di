@@ -12,9 +12,9 @@ from typing import Optional
 from src.core.logging import get_logger
 from src.core.security import hash_password, verify_password, create_access_token, generate_refresh_token
 from src.core.config import Config
-from src.models.auth import UserRegister, UserLogin, TokenResponse, UserResponse
+from src.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
 from src.repositories.auth_repository import AuthRepository
-from src.schemas.user import User
+from src.models.auth import User
 
 logger = get_logger(__name__)
 

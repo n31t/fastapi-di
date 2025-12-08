@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.schemas.user import User, RefreshToken
+from src.models.auth import User, RefreshToken
 
 
 class AuthRepository:
@@ -77,7 +77,7 @@ class AuthRepository:
 
     async def create_refresh_token(
         self,
-        user_id: int,
+        user_id: str,
         token: str,
         expires_days: int,
         user_agent: Optional[str] = None,
@@ -110,7 +110,7 @@ class AuthRepository:
         await self.session.refresh(refresh_token)
         return refresh_token
 
-    async def get_user_by_id(self, user_id: int) -> Optional[User]:
+    async def get_user_by_id(self, user_id: str) -> Optional[User]:
         """
         Get a user by ID.
 

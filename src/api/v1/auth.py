@@ -13,13 +13,13 @@ from dishka.integrations.fastapi import DishkaRoute
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from src.models.auth import UserRegister, UserLogin, TokenResponse, UserResponse
+from src.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
 from src.services.auth_service import AuthService
 from src.repositories.auth_repository import AuthRepository
 from src.core.config import Config
 from src.core.security import decode_access_token
 from src.core.logging import get_logger
-from src.schemas.user import User
+from src.models.auth import User
 
 logger = get_logger(__name__)
 
@@ -237,7 +237,7 @@ async def get_current_user_info(
         )
 
     # Fetch user from database
-    user = await auth_repository.get_user_by_id(int(user_id))
+    user = await auth_repository.get_user_by_id(user_id)
 
     if user is None:
         logger.warning("user_not_found", user_id=user_id)
