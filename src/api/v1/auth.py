@@ -14,12 +14,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from src.api.v1.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
+from src.dtos import UserRegisterDTO, UserLoginDTO
 from src.services.auth_service import AuthService
-from src.repositories.auth_repository import AuthRepository
 from src.core.config import Config
 from src.core.security import decode_access_token
 from src.core.logging import get_logger
-from src.models.auth import User
 
 logger = get_logger(__name__)
 
@@ -40,20 +39,6 @@ async def register(
 ):
     """
     Register a new user.
-
-    Creates a new user account and returns access and refresh tokens.
-
-    Args:
-        user_data: User registration data (username, email, password)
-        request: FastAPI request object for extracting metadata
-        service: AuthService dependency
-
-    Returns:
-        TokenResponse with access_token and refresh_token
-
-    Raises:
-        HTTPException 400: If username or email already exists
-        HTTPException 500: If registration fails
     """
     try:
         # Extract request metadata
@@ -67,9 +52,12 @@ async def register(
             ip_address=ip_address
         )
 
+        # Convert schema to DTO
+        user_dto = UserRegisterDTO(**user_data.model_dump())
+
         # Register user
-        tokens = await service.register_user(
-            user_data=user_data,
+        token = await service.register_user(
+            user_data=user_dto,
             user_agent=user_agent,
             ip_address=ip_address
         )
@@ -78,8 +66,7 @@ async def register(
             "registration_successful",
             username=user_data.username
         )
-
-        return tokens
+        return token
 
     except ValueError as e:
         logger.warning(
@@ -113,20 +100,6 @@ async def login(
 ):
     """
     Login a user.
-
-    Authenticates a user with username and password, returning access and refresh tokens.
-
-    Args:
-        login_data: User login credentials (username, password)
-        request: FastAPI request object for extracting metadata
-        service: AuthService dependency
-
-    Returns:
-        TokenResponse with access_token and refresh_token
-
-    Raises:
-        HTTPException 401: If credentials are invalid or user is inactive
-        HTTPException 500: If login fails
     """
     try:
         # Extract request metadata
@@ -139,9 +112,12 @@ async def login(
             ip_address=ip_address
         )
 
+        # Convert schema to DTO
+        login_dto = UserLoginDTO(**login_data.model_dump())
+
         # Login user
-        tokens = await service.login_user(
-            login_data=login_data,
+        token = await service.login_user(
+            login_data=login_dto,
             user_agent=user_agent,
             ip_address=ip_address
         )
@@ -151,7 +127,7 @@ async def login(
             username=login_data.username
         )
 
-        return tokens
+        return token
 
     except ValueError as e:
         logger.warning(
@@ -181,30 +157,10 @@ async def login(
 async def get_current_user_info(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
     service: FromDishka[AuthService],
-    auth_repository: FromDishka[AuthRepository],
     config: FromDishka[Config]
 ):
     """
     Get current authenticated user information.
-
-    Returns the profile information of the currently authenticated user
-    based on the JWT token in the Authorization header.
-
-    Args:
-        credentials: HTTP Bearer token credentials
-        service: AuthService dependency
-        auth_repository: AuthRepository dependency
-        config: Application configuration
-
-    Returns:
-        UserResponse with user profile information
-
-    Raises:
-        HTTPException 401: If token is invalid or expired
-        HTTPException 403: If user account is inactive
-
-    Headers:
-        Authorization: Bearer <access_token>
     """
     token = credentials.credentials
 
@@ -236,29 +192,31 @@ async def get_current_user_info(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Fetch user from database
-    user = await auth_repository.get_user_by_id(user_id)
+    try:
+        # Get user through service layer
+        user = await service.get_user_by_id(user_id)
 
-    if user is None:
-        logger.warning("user_not_found", user_id=user_id)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
+        logger.info(
+            "get_current_user_request",
+            user_id=user.id,
+            username=user.username
         )
 
-    # Check if user is active
-    if not user.is_active:
-        logger.warning("user_inactive", user_id=user.id)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user account"
-        )
+        return user
 
-    logger.info(
-        "get_current_user_request",
-        user_id=user.id,
-        username=user.username
-    )
-
-    return service.get_user_response(user)
+    except ValueError as e:
+        # Handle user not found or inactive errors from service
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            logger.warning("user_not_found", user_id=user_id)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=error_msg,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        else:  # Inactive user
+            logger.warning("user_inactive", user_id=user_id)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=error_msg
+            )

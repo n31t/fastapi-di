@@ -2,7 +2,7 @@
 Authentication service layer for business logic.
 
 This service handles authentication-related operations including registration,
-login, and token management.
+login, and token management. Services work with DTOs, not Pydantic schemas.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Optional
 from src.core.logging import get_logger
 from src.core.security import hash_password, verify_password, create_access_token, generate_refresh_token
 from src.core.config import Config
-from src.api.v1.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
+from src.dtos import UserRegisterDTO, UserLoginDTO, UserDTO, TokenDTO
 from src.repositories.auth_repository import AuthRepository
 from src.models.auth import User
 
@@ -28,27 +28,28 @@ class AuthService:
 
     async def register_user(
         self,
-        user_data: UserRegister,
+        user_data: UserRegisterDTO,
         user_agent: Optional[str] = None,
         ip_address: Optional[str] = None
-    ) -> TokenResponse:
+    ) -> TokenDTO:
         """
         Register a new user and return authentication tokens.
 
         Args:
-            user_data: User registration data
+            user_data: User registration DTO
             user_agent: User agent from request headers
             ip_address: IP address from request
 
         Returns:
-            TokenResponse with access and refresh tokens
+            TokenDTO with access and refresh tokens
 
         Raises:
             ValueError: If username or email already exists
 
         Example:
-            >>> service = AuthService(auth_repository)
-            >>> tokens = await service.register_user(user_data)
+            >>> service = AuthService(auth_repository, config)
+            >>> dto = UserRegisterDTO(username="john", email="john@example.com", password="SecurePass123")
+            >>> tokens = await service.register_user(dto)
         """
         logger.info(
             "registering_user",
@@ -108,7 +109,7 @@ class AuthService:
                 email=user.email
             )
 
-            return TokenResponse(
+            return TokenDTO(
                 access_token=access_token,
                 refresh_token=refresh_token
             )
@@ -126,27 +127,28 @@ class AuthService:
 
     async def login_user(
         self,
-        login_data: UserLogin,
+        login_data: UserLoginDTO,
         user_agent: Optional[str] = None,
         ip_address: Optional[str] = None
-    ) -> TokenResponse:
+    ) -> TokenDTO:
         """
         Authenticate a user and return authentication tokens.
 
         Args:
-            login_data: User login credentials (username, password)
+            login_data: User login DTO
             user_agent: User agent from request headers
             ip_address: IP address from request
 
         Returns:
-            TokenResponse with access and refresh tokens
+            TokenDTO with access and refresh tokens
 
         Raises:
             ValueError: If credentials are invalid or user is inactive
 
         Example:
-            >>> service = AuthService(auth_repository)
-            >>> tokens = await service.login_user(login_data)
+            >>> service = AuthService(auth_repository, config)
+            >>> dto = UserLoginDTO(username="john", password="SecurePass123")
+            >>> tokens = await service.login_user(dto)
         """
         logger.info(
             "login_attempt",
@@ -209,7 +211,7 @@ class AuthService:
                 ip_address=ip_address
             )
 
-            return TokenResponse(
+            return TokenDTO(
                 access_token=access_token,
                 refresh_token=refresh_token
             )
@@ -224,23 +226,54 @@ class AuthService:
             )
             raise
 
-    def get_user_response(self, user: User) -> UserResponse:
+    async def get_user_by_id(self, user_id: str) -> UserDTO:
         """
-        Convert a User database model to UserResponse.
+        Get user information by user ID.
+
+        Args:
+            user_id: User ULID
+
+        Returns:
+            UserDTO with user information
+
+        Raises:
+            ValueError: If user not found or inactive
+
+        Example:
+            >>> service = AuthService(auth_repository, config)
+            >>> user_dto = await service.get_user_by_id(user_id)
+        """
+        # Fetch user from repository
+        user = await self.auth_repository.get_user_by_id(user_id)
+
+        if user is None:
+            logger.warning("user_not_found", user_id=user_id)
+            raise ValueError("User not found")
+
+        # Check if user is active
+        if not user.is_active:
+            logger.warning("user_inactive", user_id=user.id)
+            raise ValueError("Inactive user account")
+
+        logger.debug("user_retrieved", user_id=user.id, username=user.username)
+
+        return self._model_to_dto(user)
+
+    def _model_to_dto(self, user: User) -> UserDTO:
+        """
+        Convert a User database model to UserDTO.
 
         Args:
             user: User database model
 
         Returns:
-            UserResponse with user information
-
-        Example:
-            >>> service = AuthService(auth_repository)
-            >>> user_response = service.get_user_response(user)
+            UserDTO with user information
         """
-        return UserResponse(
+        return UserDTO(
             id=user.id,
             username=user.username,
             email=user.email,
-            is_active=user.is_active
+            is_active=user.is_active,
+            created_at=user.created_at,
+            updated_at=user.updated_at
         )
