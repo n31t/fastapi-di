@@ -1,8 +1,10 @@
 """
-Dependency injection container configuration using Dishka.
+Database provider for dependency injection.
 
-This module defines the AppProvider that manages all application dependencies
-and their lifecycles using the Dishka framework.
+This module provides database-related dependencies including:
+- AsyncEngine (singleton)
+- SessionMaker (singleton)
+- AsyncSession (per-request)
 """
 
 from typing import AsyncIterable
@@ -11,17 +13,15 @@ from dishka import Provider, Scope, from_context, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, AsyncEngine, create_async_engine
 
 from src.core.config import Config
-from src.repositories.auth_repository import AuthRepository
-from src.services.auth_service import AuthService
 
 
-class AppProvider(Provider):
+class DatabaseProvider(Provider):
     """
-    Main dependency injection provider for the application.
+    Provider for database-related dependencies.
 
-    Manages dependencies with two scopes:
-    - APP: Singleton dependencies (engine, session maker, config)
-    - REQUEST: Per-request dependencies (session, repositories, services)
+    Manages:
+    - APP scope: Engine and SessionMaker (singletons)
+    - REQUEST scope: AsyncSession
     """
 
     # Config injected from application context at startup
@@ -91,32 +91,3 @@ class AppProvider(Provider):
                 raise
             finally:
                 await session.close()
-
-    @provide(scope=Scope.REQUEST)
-    def get_auth_repository(self, session: AsyncSession) -> AuthRepository:
-        """
-        Provide AuthRepository for the current request.
-
-        Args:
-            session: Database session
-
-        Returns:
-            AuthRepository instance
-        """
-        return AuthRepository(session)
-
-    @provide(scope=Scope.REQUEST)
-    def get_auth_service(
-        self, auth_repository: AuthRepository, config: Config
-    ) -> AuthService:
-        """
-        Provide AuthService for the current request.
-
-        Args:
-            auth_repository: Authentication repository
-            config: Application configuration
-
-        Returns:
-            AuthService instance
-        """
-        return AuthService(auth_repository, config)

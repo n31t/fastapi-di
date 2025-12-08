@@ -13,7 +13,7 @@ from dishka.integrations.fastapi import DishkaRoute
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from src.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
+from src.api.v1.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
 from src.services.auth_service import AuthService
 from src.repositories.auth_repository import AuthRepository
 from src.core.config import Config
