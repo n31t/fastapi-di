@@ -10,6 +10,7 @@ from src.dtos.user_dto import (
     UserDTO,
     TokenDTO,
     RefreshTokenDTO,
+    AuthenticatedUserDTO,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "UserDTO",
     "TokenDTO",
     "RefreshTokenDTO",
+    "AuthenticatedUserDTO",
 ]

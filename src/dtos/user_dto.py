@@ -55,3 +55,14 @@ class RefreshTokenDTO:
     is_revoked: bool
     user_agent: Optional[str] = None
     ip_address: Optional[str] = None
+
+
+@dataclass
+class AuthenticatedUserDTO:
+    """DTO for authenticated user with context information."""
+    id: str  # ULID
+    username: str
+    email: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime

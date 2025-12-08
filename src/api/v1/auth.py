@@ -7,17 +7,14 @@ and other authentication-related operations.
 
 from typing import Annotated
 
-import jwt
 from dishka import FromDishka
 from dishka.integrations.fastapi import DishkaRoute
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from src.api.v1.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
-from src.dtos import UserRegisterDTO, UserLoginDTO
+from src.dtos import UserRegisterDTO, UserLoginDTO, AuthenticatedUserDTO
 from src.services.auth_service import AuthService
-from src.core.config import Config
-from src.core.security import decode_access_token
+from src.services.shared.auth_helpers import get_authenticated_user_dependency
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -26,9 +23,6 @@ router = APIRouter(
     prefix="/auth",
     route_class=DishkaRoute,
 )
-
-# HTTPBearer scheme for extracting tokens from Authorization header
-security = HTTPBearer()
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -155,68 +149,17 @@ async def login(
 
 @router.get("/me", response_model=UserResponse, status_code=status.HTTP_200_OK)
 async def get_current_user_info(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-    service: FromDishka[AuthService],
-    config: FromDishka[Config]
+    user: Annotated[AuthenticatedUserDTO, Depends(get_authenticated_user_dependency)]
 ):
     """
     Get current authenticated user information.
+
+    The user is automatically authenticated via the bearer token in the Authorization header.
     """
-    token = credentials.credentials
+    logger.info(
+        "get_current_user_request",
+        user_id=user.id,
+        username=user.username
+    )
 
-    try:
-        # Decode and validate the JWT token
-        payload = decode_access_token(token, config)
-        user_id: str = payload.get("sub")
-
-        if user_id is None:
-            logger.warning("token_missing_user_id")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-    except jwt.ExpiredSignatureError:
-        logger.warning("token_expired")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.InvalidTokenError as e:
-        logger.warning("invalid_token", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    try:
-        # Get user through service layer
-        user = await service.get_user_by_id(user_id)
-
-        logger.info(
-            "get_current_user_request",
-            user_id=user.id,
-            username=user.username
-        )
-
-        return user
-
-    except ValueError as e:
-        # Handle user not found or inactive errors from service
-        error_msg = str(e)
-        if "not found" in error_msg.lower():
-            logger.warning("user_not_found", user_id=user_id)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=error_msg,
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        else:  # Inactive user
-            logger.warning("user_inactive", user_id=user_id)
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=error_msg
-            )
+    return user
