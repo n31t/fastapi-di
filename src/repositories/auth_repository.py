@@ -7,6 +7,7 @@ This repository handles database queries related to authentication.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from time import timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -99,7 +100,7 @@ class AuthRepository:
         refresh_token = RefreshToken(
             token=token,
             user_id=user_id,
-            expires_at=datetime.utcnow() + timedelta(days=expires_days),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=expires_days),
             user_agent=user_agent,
             ip_address=ip_address,
             is_revoked=False
