@@ -1,13 +1,10 @@
 """
 Authentication repository for database operations.
-
-This repository handles database queries related to authentication.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from time import timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -23,47 +20,28 @@ class AuthRepository:
         self.session: AsyncSession = session
 
     async def get_user_by_username(self, username: str) -> Optional[User]:
-        """
-        Get a user by username.
-
-        Args:
-            username: Username to search for
-
-        Returns:
-            User object or None if not found
-        """
+        """Get a user by username."""
         result = await self.session.execute(
             select(User).where(User.username == username)
         )
         return result.scalar_one_or_none()
 
     async def get_user_by_email(self, email: str) -> Optional[User]:
-        """
-        Get a user by email.
-
-        Args:
-            email: Email to search for
-
-        Returns:
-            User object or None if not found
-        """
+        """Get a user by email."""
         result = await self.session.execute(
             select(User).where(User.email == email)
         )
         return result.scalar_one_or_none()
 
+    async def get_user_by_id(self, user_id: str) -> Optional[User]:
+        """Get a user by ID."""
+        result = await self.session.execute(
+            select(User).where(User.id == user_id)
+        )
+        return result.scalar_one_or_none()
+
     async def create_user(self, username: str, email: str, hashed_password: str) -> User:
-        """
-        Create a new user in the database.
-
-        Args:
-            username: User's username
-            email: User's email
-            hashed_password: Bcrypt hashed password
-
-        Returns:
-            Created User object
-        """
+        """Create a new user in the database."""
         user = User(
             username=username,
             email=email,
@@ -84,19 +62,7 @@ class AuthRepository:
         user_agent: Optional[str] = None,
         ip_address: Optional[str] = None
     ) -> RefreshToken:
-        """
-        Create a new refresh token in the database.
-
-        Args:
-            user_id: ID of the user
-            token: Refresh token string
-            expires_days: Number of days until expiration
-            user_agent: User agent string from request
-            ip_address: IP address from request
-
-        Returns:
-            Created RefreshToken object
-        """
+        """Create a new refresh token in the database."""
         refresh_token = RefreshToken(
             token=token,
             user_id=user_id,
@@ -111,17 +77,16 @@ class AuthRepository:
         await self.session.refresh(refresh_token)
         return refresh_token
 
-    async def get_user_by_id(self, user_id: str) -> Optional[User]:
-        """
-        Get a user by ID.
-
-        Args:
-            user_id: User ID
-
-        Returns:
-            User object or None if not found
-        """
+    async def get_refresh_token(self, token: str) -> Optional[RefreshToken]:
+        """Get a refresh token by token string."""
         result = await self.session.execute(
-            select(User).where(User.id == user_id)
+            select(RefreshToken).where(RefreshToken.token == token)
         )
         return result.scalar_one_or_none()
+
+    async def revoke_refresh_token(self, token: str) -> None:
+        """Revoke a refresh token by marking it as revoked."""
+        refresh_token = await self.get_refresh_token(token)
+        if refresh_token:
+            refresh_token.is_revoked = True
+            await self.session.flush()

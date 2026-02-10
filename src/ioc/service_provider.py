@@ -24,12 +24,5 @@ class ServiceProvider(Provider):
     ) -> AuthService:
         """
         Provide AuthService for the current request.
-
-        Args:
-            auth_repository: Authentication repository
-            config: Application configuration
-
-        Returns:
-            AuthService instance
         """
         return AuthService(auth_repository, config)

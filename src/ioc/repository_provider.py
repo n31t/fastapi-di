@@ -21,11 +21,5 @@ class RepositoryProvider(Provider):
     def get_auth_repository(self, session: AsyncSession) -> AuthRepository:
         """
         Provide AuthRepository for the current request.
-
-        Args:
-            session: Database session
-
-        Returns:
-            AuthRepository instance
         """
         return AuthRepository(session)

@@ -68,7 +68,7 @@ def create_access_token(data: Dict[str, Any], config: Config) -> str:
     """
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(
-        minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES
+        minutes=config.access_token_expire_minutes
     )
 
     to_encode.update({
@@ -78,7 +78,7 @@ def create_access_token(data: Dict[str, Any], config: Config) -> str:
 
     logger.debug("creating_access_token", user_id=data.get("sub"), expires_at=expire.isoformat())
 
-    encoded_jwt = jwt.encode(to_encode, config.SECRET_KEY, algorithm=config.ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, config.secret_key, algorithm=config.algorithm)
     return encoded_jwt
 
 
@@ -108,7 +108,7 @@ def decode_access_token(token: str, config: Config) -> Dict[str, Any]:
         jwt.InvalidTokenError: If token is invalid
     """
     try:
-        payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+        payload = jwt.decode(token, config.secret_key, algorithms=[config.algorithm])
 
         if payload.get("type") != "access":
             logger.warning("invalid_token_type", token_type=payload.get("type"))

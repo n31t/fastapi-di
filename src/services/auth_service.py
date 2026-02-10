@@ -7,6 +7,7 @@ login, and token management. Services work with DTOs, not Pydantic schemas.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from src.core.logging import get_logger
@@ -96,7 +97,7 @@ class AuthService:
             await self.auth_repository.create_refresh_token(
                 user_id=user.id,
                 token=refresh_token,
-                expires_days=self.config.REFRESH_TOKEN_EXPIRE_DAYS,
+                expires_days=self.config.refresh_token_expire_days,
                 user_agent=user_agent,
                 ip_address=ip_address
             )
@@ -198,7 +199,7 @@ class AuthService:
             await self.auth_repository.create_refresh_token(
                 user_id=user.id,
                 token=refresh_token,
-                expires_days=self.config.REFRESH_TOKEN_EXPIRE_DAYS,
+                expires_days=self.config.refresh_token_expire_days,
                 user_agent=user_agent,
                 ip_address=ip_address
             )
@@ -225,3 +226,117 @@ class AuthService:
             )
             raise
 
+    async def refresh_token(
+        self,
+        refresh_token: str,
+        user_agent: Optional[str] = None,
+        ip_address: Optional[str] = None
+    ) -> TokenDTO:
+        """
+        Refresh access token using a refresh token.
+
+        Args:
+            refresh_token: Refresh token string
+            user_agent: User agent from request headers
+            ip_address: IP address from request
+
+        Returns:
+            TokenDTO with new access and refresh tokens
+
+        Raises:
+            ValueError: If refresh token is invalid, expired, or revoked
+        """
+        logger.info(
+            "refresh_token_attempt",
+            ip_address=ip_address
+        )
+
+        # Get refresh token from database
+        token_record = await self.auth_repository.get_refresh_token(refresh_token)
+
+        if not token_record:
+            logger.warning(
+                "refresh_token_not_found",
+                ip_address=ip_address
+            )
+            raise ValueError("Invalid refresh token")
+
+        # Check if token is revoked
+        if token_record.is_revoked:
+            logger.warning(
+                "refresh_token_revoked",
+                user_id=token_record.user_id,
+                ip_address=ip_address
+            )
+            raise ValueError("Refresh token has been revoked")
+
+        # Check if token is expired
+        if token_record.expires_at < datetime.now(timezone.utc):
+            logger.warning(
+                "refresh_token_expired",
+                user_id=token_record.user_id,
+                expires_at=token_record.expires_at,
+                ip_address=ip_address
+            )
+            raise ValueError("Refresh token has expired")
+
+        # Get the user
+        user = await self.auth_repository.get_user_by_id(token_record.user_id)
+        if not user:
+            logger.error(
+                "refresh_token_user_not_found",
+                user_id=token_record.user_id,
+                ip_address=ip_address
+            )
+            raise ValueError("User not found")
+
+        # Check if user is active
+        if not user.is_active:
+            logger.warning(
+                "refresh_token_user_inactive",
+                user_id=user.id,
+                ip_address=ip_address
+            )
+            raise ValueError("Account is inactive")
+
+        try:
+            # Generate new tokens FIRST (before revoking old token)
+            access_token = create_access_token(
+                data={"sub": str(user.id), "username": user.username},
+                config=self.config
+            )
+            new_refresh_token = generate_refresh_token()
+
+            # Revoke old refresh token AFTER generating new tokens
+            await self.auth_repository.revoke_refresh_token(refresh_token)
+
+            # Store new refresh token
+            await self.auth_repository.create_refresh_token(
+                user_id=user.id,
+                token=new_refresh_token,
+                expires_days=self.config.refresh_token_expire_days,
+                user_agent=user_agent,
+                ip_address=ip_address
+            )
+
+            logger.info(
+                "refresh_token_successful",
+                user_id=user.id,
+                username=user.username,
+                ip_address=ip_address
+            )
+
+            return TokenDTO(
+                access_token=access_token,
+                refresh_token=new_refresh_token
+            )
+
+        except Exception as e:
+            logger.error(
+                "refresh_token_failed",
+                user_id=token_record.user_id,
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True
+            )
+            raise

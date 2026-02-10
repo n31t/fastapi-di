@@ -16,12 +16,6 @@ logger = logging.getLogger(__name__)
 async def check_db_connection(engine: AsyncEngine) -> bool:
     """
     Check if database connection is working.
-
-    Args:
-        engine: SQLAlchemy async engine
-
-    Returns:
-        True if connection successful, False otherwise
     """
     try:
         async with engine.begin() as conn:

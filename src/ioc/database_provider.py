@@ -44,7 +44,8 @@ class DatabaseProvider(Provider):
             pool_pre_ping=True,
             pool_recycle=3600,
             pool_timeout=20,
-            max_overflow=0,
+            pool_size=10,
+            max_overflow=10,
         )
 
     @provide(scope=Scope.APP)

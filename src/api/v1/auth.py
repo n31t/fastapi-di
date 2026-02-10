@@ -1,21 +1,20 @@
 """
 Authentication API endpoints.
-
-This module provides endpoints for user registration, login, token refresh,
-and other authentication-related operations.
 """
 
-from typing import Annotated
+from typing import Annotated, Optional
 
 from dishka import FromDishka
 from dishka.integrations.fastapi import DishkaRoute
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 
-from src.api.v1.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
+from src.api.exceptions.exception_handlers import handle_auth_errors, handle_service_errors
+from src.api.v1.schemas.user import UserRegister, UserLogin, UserResponse
+from src.core.config import config
+from src.core.logging import get_logger
 from src.dtos import UserRegisterDTO, UserLoginDTO, AuthenticatedUserDTO
 from src.services.auth_service import AuthService
 from src.services.shared.auth_helpers import get_authenticated_user_dependency
-from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -25,141 +24,169 @@ router = APIRouter(
 )
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+@handle_service_errors
 async def register(
     user_data: UserRegister,
     request: Request,
-    service: FromDishka[AuthService]
+    response: Response,
+    service: FromDishka[AuthService],
 ):
-    """
-    Register a new user.
-    """
-    try:
-        # Extract request metadata
-        user_agent = request.headers.get("user-agent")
-        ip_address = request.client.host if request.client else None
+    """Register a new user."""
+    user_agent = request.headers.get("user-agent")
+    ip_address = request.client.host if request.client else None
 
-        logger.info(
-            "registration_request",
-            username=user_data.username,
-            email=user_data.email,
-            ip_address=ip_address
-        )
+    logger.info(
+        "registration_request",
+        username=user_data.username,
+        email=user_data.email,
+        ip_address=ip_address
+    )
 
-        # Convert schema to DTO
-        user_dto = UserRegisterDTO(**user_data.model_dump())
+    user_dto = UserRegisterDTO(**user_data.model_dump())
+    tokens = await service.register_user(
+        user_data=user_dto,
+        user_agent=user_agent,
+        ip_address=ip_address
+    )
 
-        # Register user
-        token = await service.register_user(
-            user_data=user_dto,
-            user_agent=user_agent,
-            ip_address=ip_address
-        )
+    response.set_cookie(
+        key="access_token",
+        value=tokens.access_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=config.access_token_expire_minutes * 60,
+        path="/"
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=tokens.refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=config.refresh_token_expire_days * 24 * 60 * 60,
+        path="/"
+    )
 
-        logger.info(
-            "registration_successful",
-            username=user_data.username
-        )
-        return token
-
-    except ValueError as e:
-        logger.warning(
-            "registration_validation_error",
-            username=user_data.username,
-            error=str(e)
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(
-            "registration_failed",
-            username=user_data.username,
-            error=str(e),
-            error_type=type(e).__name__,
-            exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to register user"
-        )
+    return {"message": "Registration successful"}
 
 
-@router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
+@router.post("/login", summary="Login a user", description="Authenticates a user and sets authentication cookies.", status_code=status.HTTP_200_OK)
+@handle_auth_errors
 async def login(
     login_data: UserLogin,
     request: Request,
-    service: FromDishka[AuthService]
+    response: Response,
+    service: FromDishka[AuthService],
 ):
-    """
-    Login a user.
-    """
-    try:
-        # Extract request metadata
-        user_agent = request.headers.get("user-agent")
-        ip_address = request.client.host if request.client else None
+    """Login user and set cookies."""
+    user_agent = request.headers.get("user-agent")
+    ip_address = request.client.host if request.client else None
 
-        logger.info(
-            "login_request",
-            username=login_data.username,
-            ip_address=ip_address
-        )
+    logger.info("login_request", username=login_data.username, ip_address=ip_address)
 
-        # Convert schema to DTO
-        login_dto = UserLoginDTO(**login_data.model_dump())
+    payload = UserLoginDTO(**login_data.model_dump())
+    tokens = await service.login_user(
+        login_data=payload,
+        user_agent=user_agent,
+        ip_address=ip_address
+    )
 
-        # Login user
-        token = await service.login_user(
-            login_data=login_dto,
-            user_agent=user_agent,
-            ip_address=ip_address
-        )
+    response.set_cookie(
+        key="access_token",
+        value=tokens.access_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=config.access_token_expire_minutes * 60,
+        path="/"
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=tokens.refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=config.refresh_token_expire_days * 24 * 60 * 60,
+        path="/"
+    )
 
-        logger.info(
-            "login_endpoint_successful",
-            username=login_data.username
-        )
+    return {"message": "Login successful"}
 
-        return token
 
-    except ValueError as e:
-        logger.warning(
-            "login_authentication_error",
-            username=login_data.username,
-            error=str(e)
-        )
+@router.post("/refresh", summary="Refresh access token", description="Refreshes the access token using a refresh token from cookies.", status_code=status.HTTP_200_OK)
+@handle_auth_errors
+async def refresh_token(
+    request: Request,
+    response: Response,
+    service: FromDishka[AuthService],
+    refresh_token: Annotated[Optional[str], Cookie()] = None,
+):
+    """Refresh access token using refresh token from cookie."""
+    if not refresh_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e)
+            detail="Refresh token missing"
         )
-    except Exception as e:
-        logger.error(
-            "login_endpoint_failed",
-            username=login_data.username,
-            error=str(e),
-            error_type=type(e).__name__,
-            exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to login"
-        )
+
+    # Extract request metadata
+    user_agent = request.headers.get("user-agent")
+    ip_address = request.client.host if request.client else None
+
+    logger.info("refresh_token_request", ip_address=ip_address)
+
+    tokens = await service.refresh_token(
+        refresh_token=refresh_token,
+        user_agent=user_agent,
+        ip_address=ip_address
+    )
+
+    response.set_cookie(
+        key="access_token",
+        value=tokens.access_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=config.access_token_expire_minutes * 60,
+        path="/"
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=tokens.refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=config.refresh_token_expire_days * 24 * 60 * 60,
+        path="/"
+    )
+
+    return {"message": "Token refreshed"}
+
+
+@router.post("/logout", summary="Logout user", description="Clears authentication cookies.", status_code=status.HTTP_200_OK)
+async def logout(response: Response):
+    """Logout user by clearing cookies."""
+    response.delete_cookie(key="access_token", httponly=True, secure=True, samesite="none", path="/")
+    response.delete_cookie(key="refresh_token", httponly=True, secure=True, samesite="none", path="/")
+    return {"message": "Logout successful"}
 
 
 @router.get("/me", response_model=UserResponse, status_code=status.HTTP_200_OK)
+@handle_service_errors
 async def get_current_user_info(
-    user: Annotated[AuthenticatedUserDTO, Depends(get_authenticated_user_dependency)]
+    user: Annotated[AuthenticatedUserDTO, Depends(get_authenticated_user_dependency)],
 ):
-    """
-    Get current authenticated user information.
+    """Get current authenticated user information."""
+    logger.info("get_current_user_request", user_id=user.id, username=user.username)
+    return user
 
-    The user is automatically authenticated via the bearer token in the Authorization header.
-    """
-    logger.info(
-        "get_current_user_request",
-        user_id=user.id,
-        username=user.username
-    )
 
+@router.get("/profile", response_model=UserResponse, status_code=status.HTTP_200_OK)
+@handle_service_errors
+async def get_profile(
+    user: Annotated[AuthenticatedUserDTO, Depends(get_authenticated_user_dependency)],
+):
+    """Get current user profile."""
+    logger.info("get_profile_request", user_id=user.id)
     return user

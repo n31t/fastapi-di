@@ -1,35 +1,74 @@
 """
 Structured logging configuration using structlog.
-
-This module provides JSON-formatted logs with correlation IDs,
-timestamps, and context information for better observability.
 """
 
 from __future__ import annotations
 
 import logging
 import sys
+import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 import structlog
 from structlog.types import FilteringBoundLogger
 
+# Context variables for request correlation
+request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
+tenant_id_ctx: ContextVar[str | None] = ContextVar("tenant_id", default=None)
+user_id_ctx: ContextVar[str | None] = ContextVar("user_id", default=None)
 
-def setup_logging(level: str = "INFO", log_file: str | None = None, json_logs: bool = True) -> None:
-    """
-    Configure structured logging for the application.
+# Service context (set once at startup)
+_service_name: str = "unknown"
+_service_version: str = "0.0.0"
+_environment: str = "development"
 
-    Args:
-        level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: Optional file path for file logging
-        json_logs: If True, use JSON formatting (recommended for production)
-    """
+
+def set_service_context(name: str, version: str, environment: str) -> None:
+    """Set service context for all log entries."""
+    global _service_name, _service_version, _environment
+    _service_name = name
+    _service_version = version
+    _environment = environment
+
+
+def add_service_context(
+    logger: logging.Logger, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
+    """Add service identification to all log entries."""
+    event_dict["service"] = _service_name
+    event_dict["version"] = _service_version
+    event_dict["environment"] = _environment
+    return event_dict
+
+
+def add_request_context(
+    logger: logging.Logger, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
+    """Add request correlation context to log entries."""
+    request_id = request_id_ctx.get()
+    tenant_id = tenant_id_ctx.get()
+    user_id = user_id_ctx.get()
+
+    if request_id:
+        event_dict["request_id"] = request_id
+    if tenant_id:
+        event_dict["tenant_id"] = tenant_id
+    if user_id:
+        event_dict["user_id"] = user_id
+
+    return event_dict
+
+
+def setup_logging(
+    level: str = "INFO",
+    log_file: str | None = None,
+    json_logs: bool = True
+) -> None:
+    """Configure structured logging."""
     if log_file:
         Path("logs").mkdir(exist_ok=True)
-        log_file_path = f"logs/{log_file}"
-    else:
-        log_file_path = None  # noqa: F841
 
     logging.basicConfig(
         format="%(message)s",
@@ -39,12 +78,15 @@ def setup_logging(level: str = "INFO", log_file: str | None = None, json_logs: b
 
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    processors = [
+    processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
-        structlog.processors.TimeStamper(fmt="iso"),
+        add_service_context,
+        add_request_context,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
@@ -66,36 +108,38 @@ def setup_logging(level: str = "INFO", log_file: str | None = None, json_logs: b
 
 
 def get_logger(name: str | None = None) -> FilteringBoundLogger:
-    """
-    Get a structured logger instance.
-
-    Args:
-        name: Logger name (typically __name__ of the calling module)
-
-    Returns:
-        Structured logger instance with context binding support
-
-    Example:
-        >>> logger = get_logger(__name__)
-        >>> logger.info("user_created", user_id=123, email="user@example.com")
-    """
+    """Get a structured logger instance."""
     return structlog.get_logger(name or __name__)
 
 
+def generate_request_id() -> str:
+    """Generate a unique request ID for correlation."""
+    return str(uuid.uuid4())
+
+
+def set_request_context(
+    request_id: str | None = None,
+    tenant_id: str | None = None,
+    user_id: str | None = None
+) -> None:
+    """Set request context for logging correlation."""
+    if request_id:
+        request_id_ctx.set(request_id)
+    if tenant_id:
+        tenant_id_ctx.set(tenant_id)
+    if user_id:
+        user_id_ctx.set(user_id)
+
+
+def clear_request_context() -> None:
+    """Clear request context."""
+    request_id_ctx.set(None)
+    tenant_id_ctx.set(None)
+    user_id_ctx.set(None)
+
+
 def bind_context(**kwargs: Any) -> None:
-    """
-    Bind context variables that will be included in all subsequent log entries.
-
-    This is useful for adding correlation IDs, user IDs, or request IDs
-    that should appear in all logs within a request context.
-
-    Args:
-        **kwargs: Context key-value pairs to bind
-
-    Example:
-        >>> bind_context(request_id="abc-123", user_id=456)
-        >>> logger.info("processing_request")  # Will include request_id and user_id
-    """
+    """Bind context variables for current log entries."""
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(**kwargs)
 
@@ -103,3 +147,6 @@ def bind_context(**kwargs: Any) -> None:
 def clear_context() -> None:
     """Clear all bound context variables."""
     structlog.contextvars.clear_contextvars()
+
+
+logger = get_logger(__name__)
