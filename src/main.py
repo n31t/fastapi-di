@@ -1,7 +1,6 @@
 """
 Main FastAPI application with logging, monitoring, and middleware setup.
 """
-
 from contextlib import asynccontextmanager
 
 from dishka import make_async_container
@@ -82,7 +81,6 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(StandardResponseMiddleware)
 
-    # Register exception handlers
     register_exception_handlers(app)
 
     return app

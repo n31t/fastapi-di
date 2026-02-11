@@ -1,8 +1,5 @@
 """
 Authentication service layer for business logic.
-
-This service handles authentication-related operations including registration,
-login, and token management. Services work with DTOs, not Pydantic schemas.
 """
 
 from __future__ import annotations
