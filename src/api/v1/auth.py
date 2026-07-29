@@ -8,7 +8,6 @@ from dishka import FromDishka
 from dishka.integrations.fastapi import DishkaRoute
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 
-from src.api.exceptions.exception_handlers import handle_auth_errors, handle_service_errors
 from src.api.v1.schemas.user import UserRegister, UserLogin, UserResponse
 from src.core.config import config
 from src.core.logging import get_logger
@@ -25,7 +24,6 @@ router = APIRouter(
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-@handle_service_errors
 async def register(
     user_data: UserRegister,
     request: Request,
@@ -73,7 +71,6 @@ async def register(
 
 
 @router.post("/login", summary="Login a user", description="Authenticates a user and sets authentication cookies.", status_code=status.HTTP_200_OK)
-@handle_auth_errors
 async def login(
     login_data: UserLogin,
     request: Request,
@@ -116,7 +113,6 @@ async def login(
 
 
 @router.post("/refresh", summary="Refresh access token", description="Refreshes the access token using a refresh token from cookies.", status_code=status.HTTP_200_OK)
-@handle_auth_errors
 async def refresh_token(
     request: Request,
     response: Response,
@@ -173,7 +169,6 @@ async def logout(response: Response):
 
 
 @router.get("/me", response_model=UserResponse, status_code=status.HTTP_200_OK)
-@handle_service_errors
 async def get_current_user_info(
     user: Annotated[AuthenticatedUserDTO, Depends(get_authenticated_user_dependency)],
 ):
@@ -183,7 +178,6 @@ async def get_current_user_info(
 
 
 @router.get("/profile", response_model=UserResponse, status_code=status.HTTP_200_OK)
-@handle_service_errors
 async def get_profile(
     user: Annotated[AuthenticatedUserDTO, Depends(get_authenticated_user_dependency)],
 ):

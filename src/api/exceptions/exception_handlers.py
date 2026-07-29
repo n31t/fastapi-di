@@ -1,279 +1,162 @@
-"""
-Custom exception handlers for consistent API error responses.
+"""RFC 9457 problem+json exception handlers. The single error-translation path."""
 
-This module provides:
-1. Global FastAPI exception handlers (register with app)
-2. Route decorators for fine-grained error handling
+from http import HTTPStatus
 
-"""
-
-from functools import wraps
-from typing import Callable, Any
-from fastapi import Request, HTTPException, status
-from fastapi.responses import JSONResponse
+from asgi_correlation_id.context import correlation_id
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from pydantic import ValidationError
 
+from src.core.exceptions import AppError
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Constants for sanitized error messages
-VALIDATION_ERROR_MSG = "Invalid data provided"
-INVALID_REQUEST_MSG = "Invalid request"
-INTERNAL_ERROR_MSG = "Internal server error"
+PROBLEM_JSON_MEDIA_TYPE = "application/problem+json"
 
 
-async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-    """
-    Handle HTTPException with standardized error response.
+class FieldError(BaseModel):
+    """Single field failure inside a 422 response."""
 
-    Returns sanitized error message - does not expose internal error details.
-    """
-    detail = str(exc.detail) if exc.detail else "An error occurred"
-    
-    # Sanitize error messages - don't expose internal validation details
-    detail_lower = detail.lower()
-    if "validation error" in detail_lower or "pydantic" in detail_lower:
-        sanitized_message = VALIDATION_ERROR_MSG
-    else:
-        # For other errors, use the detail but limit exposure of internal details
-        sanitized_message = detail
-    
-    logger.error(
+    field: str  # dotted path, source prefix ("body", "query") stripped
+    code: str  # pydantic-core error type, e.g. "string_too_short"
+    message: str
+
+
+class ProblemDetail(BaseModel):
+    """RFC 9457 problem details body with project extensions."""
+
+    type: str = "about:blank"
+    title: str
+    status: int
+    detail: str | None = None
+    code: str  # extension: stable error code
+    request_id: str | None = None  # extension: correlation ID
+    errors: list[FieldError] | None = None  # extension: 422 field breakdown
+
+
+def _problem_response(
+    status_code: int,
+    *,
+    title: str,
+    code: str,
+    detail: str | None = None,
+    errors: list[FieldError] | None = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    problem = ProblemDetail(
+        title=title,
+        status=status_code,
+        detail=detail,
+        code=code,
+        request_id=correlation_id.get(),
+        errors=errors,
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content=problem.model_dump(exclude_none=True),
+        media_type=PROBLEM_JSON_MEDIA_TYPE,
+        headers=headers,
+    )
+
+
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    """Translate domain errors. Expected failures: logged at WARNING."""
+    logger.warning(
+        "app_error",
+        code=exc.code,
+        status_code=exc.status_code,
+        path=request.url.path,
+        method=request.method,
+        detail=exc.message,
+        context=exc.context,
+    )
+    return _problem_response(
+        exc.status_code,
+        title=exc.title,
+        code=exc.code,
+        detail=exc.message,
+        headers=exc.headers,
+    )
+
+
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Translate request validation failures with a field-level breakdown."""
+    errors = [
+        FieldError(
+            field=".".join(str(loc) for loc in err["loc"][1:]) or "__root__",
+            code=err["type"],
+            message=err["msg"],
+        )
+        for err in exc.errors()
+    ]
+    logger.info(
+        "request_validation_failed",
+        path=request.url.path,
+        method=request.method,
+        errors=[e.model_dump() for e in errors],
+    )
+    return _problem_response(
+        422,
+        title="Unprocessable Entity",
+        code="validation_error",
+        detail="Request validation failed",
+        errors=errors,
+    )
+
+
+async def http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
+    """Translate transport-level HTTPExceptions (controllers/framework only)."""
+    logger.warning(
         "http_exception",
         path=request.url.path,
         method=request.method,
         status_code=exc.status_code,
-        detail=exc.detail
+        detail=exc.detail,
+    )
+    try:
+        title = HTTPStatus(exc.status_code).phrase
+    except ValueError:  # non-standard status code must not crash the handler
+        title = "Error"
+    return _problem_response(
+        exc.status_code,
+        title=title,
+        code="http_error",
+        detail=str(exc.detail) if exc.detail else None,
+        headers=dict(exc.headers) if exc.headers else None,
     )
 
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "status": "error",
-            "code": exc.status_code,
-            "message": sanitized_message
-        }
-    )
 
-
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """
-    Handle validation errors with standardized error response.
-    """
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all: 500, generic body, full traceback in logs. Never leaks internals."""
     logger.error(
-        "validation_exception",
-        path=request.url.path,
-        method=request.method,
-        errors=exc.errors()
-    )
-
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "status": "error",
-            "code": status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "message": "Invalid request data"
-        }
-    )
-
-
-async def pydantic_validation_error_handler(request: Request, exc: ValidationError) -> JSONResponse:
-    """
-    Handle Pydantic model validation errors (internal validation, not request validation).
-    
-    Returns sanitized error message - does not expose internal validation details.
-    """
-    logger.error(
-        "pydantic_validation_error",
-        path=request.url.path,
-        method=request.method,
-        errors=str(exc),
-        exc_info=True
-    )
-
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "status": "error",
-            "code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "message": INTERNAL_ERROR_MSG
-        }
-    )
-
-
-async def value_error_exception_handler(request: Request, exc: ValueError) -> JSONResponse:
-    """
-    Handle ValueError with standardized error response.
-    """
-    error_message = str(exc)
-    
-    # Sanitize error messages - don't expose internal validation details
-    error_lower = error_message.lower()
-    if "validation error" in error_lower or "pydantic" in error_lower:
-        sanitized_message = VALIDATION_ERROR_MSG
-    else:
-        # For other ValueErrors, use a generic message
-        sanitized_message = INVALID_REQUEST_MSG
-    
-    logger.error(
-        "value_error_exception",
-        path=request.url.path,
-        method=request.method,
-        error=error_message  # Log full error internally
-    )
-
-    return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content={
-            "status": "error",
-            "code": status.HTTP_400_BAD_REQUEST,
-            "message": sanitized_message
-        }
-    )
-
-
-async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """
-    Handle unexpected exceptions with standardized error response.
-
-    Returns 500 Internal Server Error.
-    """
-    logger.error(
-        "unexpected_exception",
+        "unhandled_exception",
         path=request.url.path,
         method=request.method,
         error=str(exc),
-        exc_info=True
+        error_type=type(exc).__name__,
+        exc_info=True,
+    )
+    return _problem_response(
+        500,
+        title="Internal Server Error",
+        code="internal_error",
+        detail="An unexpected error occurred",
     )
 
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "status": "error",
-            "code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "message": INTERNAL_ERROR_MSG
-        }
-    )
 
-
-def register_exception_handlers(app):
-    """
-    Register all custom exception handlers with the FastAPI app.
-    """
-    # Standard FastAPI exceptions
-    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+def register_exception_handlers(app: FastAPI) -> None:
+    """Register all exception handlers. Called once from create_app()."""
+    app.add_exception_handler(AppError, app_error_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    
-    # Pydantic model validation errors (internal validation, not request validation)
-    app.add_exception_handler(ValidationError, pydantic_validation_error_handler)
-    
-    # Standard Python exceptions
-    app.add_exception_handler(ValueError, value_error_exception_handler)
-    
-    # Catch-all for any other exceptions
-    app.add_exception_handler(Exception, generic_exception_handler)
-
-
-# ============================================================================
-# Route Decorators for Fine-Grained Error Handling
-# ============================================================================
-
-def handle_service_errors(func: Callable) -> Callable:
-    """
-    Decorator for handling service-layer exceptions in individual routes.
-
-    This decorator converts application exceptions to HTTP exceptions,
-    providing more control than global handlers. Use this when you need
-    route-specific error handling or when global handlers are not suitable.
-    """
-    @wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return await func(*args, **kwargs)
-
-        except ValidationError as e:
-            # Pydantic model validation error - don't expose internal details
-            logger.error(
-                "route_validation_error",
-                error=str(e),
-                route=func.__name__,
-                exc_info=True
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=INTERNAL_ERROR_MSG
-            )
-        
-        except ValueError as e:
-            error_message = str(e)
-            # Sanitize error messages - don't expose internal validation details
-            error_lower = error_message.lower()
-            if "validation error" in error_lower or "pydantic" in error_lower:
-                sanitized_message = VALIDATION_ERROR_MSG
-            else:
-                sanitized_message = INVALID_REQUEST_MSG
-            
-            logger.warning(
-                "route_value_error",
-                error=error_message,  # Log full error internally
-                route=func.__name__
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=sanitized_message
-            )
-
-        except Exception as e:
-            # Unexpected errors - log with full traceback
-            logger.error(
-                "route_unexpected_error",
-                error=str(e),
-                error_type=type(e).__name__,
-                route=func.__name__,
-                exc_info=True
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=INTERNAL_ERROR_MSG
-            )
-
-    return wrapper
-
-
-def handle_auth_errors(func: Callable) -> Callable:
-    """
-    Specialized decorator for authentication routes.
-    """
-    @wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return await func(*args, **kwargs)
-
-        except ValueError as e:
-            logger.warning(
-                "auth_route_invalid_input",
-                error=str(e),
-                route=func.__name__
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e) or "Invalid credentials provided"
-            )
-
-        except Exception as e:
-            logger.error(
-                "auth_route_error",
-                error=str(e),
-                error_type=type(e).__name__,
-                route=func.__name__,
-                exc_info=True
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Authentication error"
-            )
-
-    return wrapper
+    # Starlette's class, not FastAPI's re-export: catches both.
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    # Special-cased by Starlette's ServerErrorMiddleware: the response is sent,
+    # then the exception is re-raised (test clients see it unless configured not to).
+    app.add_exception_handler(Exception, unhandled_exception_handler)
