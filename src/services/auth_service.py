@@ -7,6 +7,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
+from src.core.exceptions import (
+    EmailTakenError,
+    InactiveUserError,
+    InvalidCredentialsError,
+    InvalidTokenError,
+    TokenExpiredError,
+    UsernameTakenError,
+)
 from src.core.logging import get_logger
 from src.core.security import hash_password, verify_password, create_access_token, generate_refresh_token
 from src.core.config import Config
@@ -41,7 +49,7 @@ class AuthService:
             TokenDTO with access and refresh tokens
 
         Raises:
-            ValueError: If username or email already exists
+            UsernameTakenError / EmailTakenError: on duplicate username/email
 
         Example:
             >>> service = AuthService(auth_repository, config)
@@ -61,7 +69,7 @@ class AuthService:
                 "registration_failed_username_exists",
                 username=user_data.username
             )
-            raise ValueError("Username already exists")
+            raise UsernameTakenError("Username already exists")
 
         # Check if email already exists
         existing_email = await self.auth_repository.get_user_by_email(user_data.email)
@@ -70,7 +78,7 @@ class AuthService:
                 "registration_failed_email_exists",
                 email=user_data.email
             )
-            raise ValueError("Email already exists")
+            raise EmailTakenError("Email already exists")
 
         try:
             # Hash the password
@@ -140,7 +148,7 @@ class AuthService:
             TokenDTO with access and refresh tokens
 
         Raises:
-            ValueError: If credentials are invalid or user is inactive
+            InvalidCredentialsError / InactiveUserError: on bad credentials or inactive account
 
         Example:
             >>> service = AuthService(auth_repository, config)
@@ -162,7 +170,7 @@ class AuthService:
                 username=login_data.username,
                 ip_address=ip_address
             )
-            raise ValueError("Invalid username or password")
+            raise InvalidCredentialsError("Invalid username or password")
 
         # Verify password
         if not verify_password(login_data.password, user.hashed_password):
@@ -172,7 +180,7 @@ class AuthService:
                 user_id=user.id,
                 ip_address=ip_address
             )
-            raise ValueError("Invalid username or password")
+            raise InvalidCredentialsError("Invalid username or password")
 
         # Check if user is active
         if not user.is_active:
@@ -182,7 +190,7 @@ class AuthService:
                 user_id=user.id,
                 ip_address=ip_address
             )
-            raise ValueError("Account is inactive")
+            raise InactiveUserError("Account is inactive")
 
         try:
             # Generate tokens
@@ -241,7 +249,7 @@ class AuthService:
             TokenDTO with new access and refresh tokens
 
         Raises:
-            ValueError: If refresh token is invalid, expired, or revoked
+            InvalidTokenError / TokenExpiredError / InactiveUserError: on bad, expired, revoked token or inactive user
         """
         logger.info(
             "refresh_token_attempt",
@@ -256,7 +264,7 @@ class AuthService:
                 "refresh_token_not_found",
                 ip_address=ip_address
             )
-            raise ValueError("Invalid refresh token")
+            raise InvalidTokenError("Invalid refresh token")
 
         # Check if token is revoked
         if token_record.is_revoked:
@@ -265,7 +273,7 @@ class AuthService:
                 user_id=token_record.user_id,
                 ip_address=ip_address
             )
-            raise ValueError("Refresh token has been revoked")
+            raise InvalidTokenError("Refresh token has been revoked")
 
         # Check if token is expired
         if token_record.expires_at < datetime.now(timezone.utc):
@@ -275,7 +283,7 @@ class AuthService:
                 expires_at=token_record.expires_at,
                 ip_address=ip_address
             )
-            raise ValueError("Refresh token has expired")
+            raise TokenExpiredError("Refresh token has expired")
 
         # Get the user
         user = await self.auth_repository.get_user_by_id(token_record.user_id)
@@ -285,7 +293,7 @@ class AuthService:
                 user_id=token_record.user_id,
                 ip_address=ip_address
             )
-            raise ValueError("User not found")
+            raise InvalidTokenError("Invalid refresh token")
 
         # Check if user is active
         if not user.is_active:
@@ -294,7 +302,7 @@ class AuthService:
                 user_id=user.id,
                 ip_address=ip_address
             )
-            raise ValueError("Account is inactive")
+            raise InactiveUserError("Account is inactive")
 
         try:
             # Generate new tokens FIRST (before revoking old token)
