@@ -6,10 +6,11 @@ from typing import Annotated, Optional
 
 from dishka import FromDishka
 from dishka.integrations.fastapi import DishkaRoute
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 
 from src.api.v1.schemas.user import UserRegister, UserLogin, UserResponse
 from src.core.config import config
+from src.core.exceptions import UnauthorizedError
 from src.core.logging import get_logger
 from src.dtos import UserRegisterDTO, UserLoginDTO, AuthenticatedUserDTO
 from src.services.auth_service import AuthService
@@ -121,10 +122,7 @@ async def refresh_token(
 ):
     """Refresh access token using refresh token from cookie."""
     if not refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token missing"
-        )
+        raise UnauthorizedError("Refresh token missing")
 
     # Extract request metadata
     user_agent = request.headers.get("user-agent")
