@@ -14,3 +14,10 @@ jwt_imp.md
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Local tooling state and caches
+.beads/
+.claude/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

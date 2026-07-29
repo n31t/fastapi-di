@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "server",
-  "dolt_database": "fastapi_di",
-  "project_id": "33d87557-4c79-4052-bb0b-33449885fcf1"
-}
