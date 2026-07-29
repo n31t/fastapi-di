@@ -8,9 +8,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.auth import User, RefreshToken
+from src.repositories.error_mapping import map_integrity_error
 
 
 class AuthRepository:
@@ -41,7 +43,7 @@ class AuthRepository:
         return result.scalar_one_or_none()
 
     async def create_user(self, username: str, email: str, hashed_password: str) -> User:
-        """Create a new user in the database."""
+        """Create a new user; raises a ConflictError subclass on uniqueness violation."""
         user = User(
             username=username,
             email=email,
@@ -50,7 +52,13 @@ class AuthRepository:
         )
 
         self.session.add(user)
-        await self.session.flush()
+        try:
+            # flush() inside the try: the commit happens later in DI teardown,
+            # so the constraint violation must surface within the request scope.
+            await self.session.flush()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise map_integrity_error(exc) from exc
         await self.session.refresh(user)
         return user
 
