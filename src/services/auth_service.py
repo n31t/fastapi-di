@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from src.core.exceptions import (
+    AppError,
     EmailTakenError,
     InactiveUserError,
     InvalidCredentialsError,
@@ -119,6 +120,9 @@ class AuthService:
                 refresh_token=refresh_token
             )
 
+        except AppError:
+            raise  # expected domain failures: logged at WARNING by the global handler
+
         except Exception as e:
             logger.error(
                 "user_registration_failed",
@@ -220,6 +224,9 @@ class AuthService:
                 access_token=access_token,
                 refresh_token=refresh_token
             )
+
+        except AppError:
+            raise  # expected domain failures: logged at WARNING by the global handler
 
         except Exception as e:
             logger.error(
@@ -335,6 +342,9 @@ class AuthService:
                 access_token=access_token,
                 refresh_token=new_refresh_token
             )
+
+        except AppError:
+            raise  # expected domain failures: logged at WARNING by the global handler
 
         except Exception as e:
             logger.error(
