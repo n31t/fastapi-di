@@ -114,17 +114,17 @@ class TestDatabaseConnection:
         config = Config()
         
         # Check if required config values are present
-        assert hasattr(config, 'DB_USER'), "DB_USER not configured"
-        assert hasattr(config, 'DB_PASSWORD'), "DB_PASSWORD not configured"
-        assert hasattr(config, 'DB_HOST'), "DB_HOST not configured"
-        assert hasattr(config, 'DB_NAME'), "DB_NAME not configured"
-        
+        assert config.database.user, "database user not configured"
+        assert config.database.password, "database password not configured"
+        assert config.database.host, "database host not configured"
+        assert config.database.name, "database name not configured"
+
         # Check if db_url is properly formatted
         db_url = config.db_url
         assert "postgresql+asyncpg://" in db_url, "Invalid database URL format"
-        assert config.DB_USER in db_url, "Username not in database URL"
-        assert config.DB_HOST in db_url, "Host not in database URL"
-        assert config.DB_NAME in db_url, "Database name not in database URL"
+        assert config.database.user in db_url, "Username not in database URL"
+        assert config.database.host in db_url, "Host not in database URL"
+        assert config.database.name in db_url, "Database name not in database URL"
 
     @pytest.mark.asyncio
     async def test_transaction_rollback(self):
