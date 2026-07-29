@@ -3,6 +3,7 @@ Main FastAPI application with logging, monitoring, and middleware setup.
 """
 from contextlib import asynccontextmanager
 
+from asgi_correlation_id import CorrelationIdMiddleware
 from dishka import make_async_container
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from dishka.integrations import fastapi as fastapi_integration
@@ -78,8 +79,10 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
     app.add_middleware(StandardResponseMiddleware)
+    app.add_middleware(CorrelationIdMiddleware)
 
     register_exception_handlers(app)
 
