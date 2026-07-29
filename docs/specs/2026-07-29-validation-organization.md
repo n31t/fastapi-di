@@ -17,11 +17,11 @@ Web research across Netflix Dispatch, Polar, cosmicpython, Pydantic v2 docs, zha
 | Kind of rule | Authoritative home | Key reference |
 |---|---|---|
 | Syntactic / format / shape | API schemas, via shared `Annotated` types | [Pydantic types](https://docs.pydantic.dev/latest/concepts/types/), [Parse, don't validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-dont-validate/) |
-| Reusable field rules | Shared `Annotated` types module, format-only | [Pydantic validators](https://docs.pydantic.dev/latest/concepts/validators/), [Dispatch `types.py`](https://github.com/Netflix/dispatch/tree/main/src/dispatch) |
+| Reusable field rules | Shared `Annotated` types module, format-only | [Pydantic validators](https://docs.pydantic.dev/latest/concepts/validators/), [Dispatch shared kernel (`models.py`/`enums.py`)](https://github.com/Netflix/dispatch/tree/main/src/dispatch) |
 | Business rules (state, tenancy, workflow) | Services, raising domain exceptions | [cosmicpython ch.1](https://www.cosmicpython.com/book/chapter_01_domain_model), [Microsoft DDD validations](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/domain-model-layer-validations) |
 | Uniqueness / cross-entity invariants | **DB constraint is authoritative**; `IntegrityError` → domain `ConflictError` mapping; service pre-check optional, UX only | [Khorikov](https://enterprisecraftsmanship.com/posts/handling-unique-constraint-violations/) |
 | DB-backed request checks (existence, ownership) | FastAPI dependencies | [fastapi-best-practices](https://github.com/zhanymkanov/fastapi-best-practices) |
-| DTOs | Validation-free containers — never business validators (drift vector) | practitioner consensus |
+| DTOs | Validation-free containers — never business validators (drift vector) | ["Pydantic at the edge, dataclasses in the core"](https://hrekov.com/blog/dataclasses-or-pydantic-basemodels) |
 
 Organizational options evaluated:
 
@@ -34,7 +34,7 @@ Organizational options evaluated:
 
 ### 1. Kernel restructure — `src/core/`
 
-**Create `src/core/validators.py`** — plain validator functions, public names, zero Pydantic-type coupling so workers/CLI/DTO code can import them directly:
+**Create `src/core/validators.py`** — plain validator functions, public names, zero Pydantic-type coupling so workers/CLI/service code can import them directly:
 
 ```python
 """Reusable plain validator functions. Wrapped by Annotated types in core/types.py."""
@@ -110,18 +110,51 @@ class ResponseModel(BaseModel):
 
 1. The one-home-per-rule table (from Research Summary above), with repo-relative pointers (`src/core/types.py`, `src/services/`, `src/repositories/error_mapping.py`, `src/models/`).
 2. **Rules:**
-   - Format rules live in schemas via shared `Annotated` types; add a new shared type only when ≥2 schemas need the same rule, otherwise keep it inline in the schema.
+   - Format rules live in schemas via shared `Annotated` types; add a new shared type when ≥2 schemas need the same rule, **or** when the rule is security-critical / defines the canonical format for a domain-wide field (as with `Password` and `Username` today); otherwise keep it inline in the schema.
    - `core/types.py` stays format-only. If a "type" needs DB, request, or tenant context, it is a FastAPI dependency or a service rule.
    - Business rules live in services and raise the `AppError` hierarchy from `src/core/exceptions.py`. Never in schemas, never in DTOs.
-   - DTOs are validation-free Pydantic containers (`model_validate(..., from_attributes=True)`); adding validators to DTOs is the primary drift vector and is forbidden.
+   - DTOs are validation-free containers — in this boilerplate they are stdlib dataclasses (see `src/dtos/user_dto.py`), constructed by services from models. Adding validation or business rules to DTOs is the primary drift vector and is forbidden. (Whether to migrate DTOs to Pydantic `BaseModel` — enabling `model_validate(model, from_attributes=True)` conversion per CLAUDE.md's service-layer pattern — is an open question the doc flags as future work; this spec changes nothing about DTOs.)
    - Every uniqueness/cross-entity invariant gets a DB constraint plus an entry in `_CONSTRAINT_MAP` (`src/repositories/error_mapping.py`). A service pre-check is optional and purely for UX; the constraint is the enforcement (races).
-   - DB-backed request checks (existence, ownership) go in FastAPI dependencies under `src/api/v1/dependencies/` — with a worked `valid_review_id`-style code example *in the doc*. The package is created when the first path-ID endpoint appears, not scaffolded empty now.
+   - DB-backed request checks (existence, ownership) go in FastAPI dependencies under `src/api/v1/dependencies/` — with the worked example below included verbatim *in the doc*. The package is created when the first path-ID endpoint appears, not scaffolded empty now.
+
+   Worked example for the conventions doc (illustrative — no `Review` entity exists yet; with Dishka, dependencies resolve services from the request-scoped container):
+
+   ```python
+   from typing import Annotated
+
+   from fastapi import Depends, Request
+
+   from src.dtos.review_dto import ReviewDTO
+   from src.services.review_service import ReviewService
+
+
+   async def valid_review_id(review_id: str, request: Request) -> ReviewDTO:
+       """Resolve a path review_id or let the service raise NotFoundError (→ 404)."""
+       container = request.state.dishka_container
+       service: ReviewService = await container.get(ReviewService)
+       return await service.get_review(review_id)
+
+
+   ReviewById = Annotated[ReviewDTO, Depends(valid_review_id)]
+   # Usage: async def get_review(review: ReviewById) -> ReviewResponse: ...
+   ```
 3. **Scaling triggers (when to evolve the structure):**
    - Split `core/types.py` per domain (or restructure to per-domain packages, Dispatch/Polar style) when: >3 teams touch it, or it exceeds ~200 lines, or merge conflicts become routine.
    - Promote a type to a real value object (frozen, behavior-carrying) only when it accrues behavior (e.g. `Money`), per cosmicpython.
-4. References list (URLs from Research Summary).
+4. **Multi-error business validation:** a short subsection naming Fowler's [Notification/result-object pattern](https://www.martinfowler.com/articles/replaceThrowWithNotification.html) as the approach to reach for when a business flow must report multiple failures at once (bulk imports, multi-field forms) instead of failing on the first `AppError`. Documented with a link only — no current use case, no implementation.
+5. References list (URLs from Research Summary).
 
-**Update `CLAUDE.md`** with a short "Validation Ownership" pointer section (a few lines + link to the conventions doc) so agents follow it automatically.
+**Update `CLAUDE.md`** — insert the following section immediately after the "Code Style" section (i.e. before the "Service Layer DTO Pattern (CRUD Rule)" section), verbatim:
+
+```markdown
+## Validation Ownership
+
+Each validation rule has exactly ONE authoritative home — full rules in `docs/conventions/validation.md`:
+- Format/shape rules → API schemas, via shared Annotated types in `src/core/types.py` (format-only module)
+- Business rules (state, tenancy, workflow) → services, raising the `AppError` hierarchy from `src/core/exceptions.py`
+- Uniqueness / cross-entity invariants → DB constraint + `src/repositories/error_mapping.py`; service pre-checks are UX only
+- DTOs are validation-free containers — never add validators or business rules to DTOs
+```
 
 ### 3. Migration of existing schemas
 
