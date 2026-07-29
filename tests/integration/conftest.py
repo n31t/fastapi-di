@@ -40,7 +40,9 @@ async def raw_client(app):
 
 @pytest.fixture(autouse=True)
 async def clean_db(app):
-    yield
     engine: AsyncEngine = await app.state.dishka_container.get(AsyncEngine)
+    async with engine.begin() as conn:
+        await conn.execute(text("TRUNCATE refresh_tokens, users CASCADE"))
+    yield
     async with engine.begin() as conn:
         await conn.execute(text("TRUNCATE refresh_tokens, users CASCADE"))
