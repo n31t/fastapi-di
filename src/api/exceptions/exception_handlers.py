@@ -20,8 +20,8 @@ PROBLEM_JSON_MEDIA_TYPE = "application/problem+json"
 class FieldError(BaseModel):
     """Single field failure inside a 422 response."""
 
-    field: str  # dotted path, source prefix ("body", "query") stripped
-    code: str  # pydantic-core error type, e.g. "string_too_short"
+    field: str
+    code: str
     message: str
 
 
@@ -32,9 +32,9 @@ class ProblemDetail(BaseModel):
     title: str
     status: int
     detail: str | None = None
-    code: str  # extension: stable error code
-    request_id: str | None = None  # extension: correlation ID
-    errors: list[FieldError] | None = None  # extension: 422 field breakdown
+    code: str
+    request_id: str | None = None
+    errors: list[FieldError] | None = None
 
 
 def _problem_response(
