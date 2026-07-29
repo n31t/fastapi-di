@@ -26,4 +26,10 @@ dependencies = [
     "structlog>=25.4.0",
     "python-ulid>=3.0.0",
     "uvicorn>=0.37.0",
+    "asgi-correlation-id>=5.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
 ]

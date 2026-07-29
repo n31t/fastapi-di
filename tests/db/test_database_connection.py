@@ -3,7 +3,6 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy import text
 
-from src.db.database import AsyncSessionLocal
 from src.core.config import Config
 
 
@@ -130,22 +129,35 @@ class TestDatabaseConnection:
     @pytest.mark.asyncio
     async def test_transaction_rollback(self):
         """Test if transaction rollback works properly."""
-        async with AsyncSessionLocal() as session:
-            try:
-                # Start a transaction
-                await session.execute(text("SELECT 1"))
-                
-                # Force an error to test rollback
-                await session.execute(text("SELECT * FROM non_existent_table"))
-                
-            except Exception:
-                # This should trigger rollback
-                await session.rollback()
-                
-                # Test that we can still use the session after rollback
-                result = await session.execute(text("SELECT 1 as test"))
-                row = result.fetchone()
-                assert row[0] == 1
+        config = Config()
+        test_engine = create_async_engine(config.db_url)
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        TestSessionLocal = async_sessionmaker(
+            test_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        try:
+            async with TestSessionLocal() as session:
+                try:
+                    # Start a transaction
+                    await session.execute(text("SELECT 1"))
+
+                    # Force an error to test rollback
+                    await session.execute(text("SELECT * FROM non_existent_table"))
+
+                except Exception:
+                    # This should trigger rollback
+                    await session.rollback()
+
+                    # Test that we can still use the session after rollback
+                    result = await session.execute(text("SELECT 1 as test"))
+                    row = result.fetchone()
+                    assert row[0] == 1
+        finally:
+            await test_engine.dispose()
 
     @pytest.mark.asyncio
     async def test_multiple_concurrent_connections(self):
