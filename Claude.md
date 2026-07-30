@@ -59,6 +59,14 @@ src/
 - Keep docstrings to 1-2 sentences max
 - Use type hints everywhere
 
+## Validation Ownership
+
+Each validation rule has exactly ONE authoritative home — full rules in `docs/conventions/validation.md`:
+- Format/shape rules → API schemas, via shared Annotated types in `src/core/types.py` (format-only module)
+- Business rules (state, tenancy, workflow) → services, raising the `AppError` hierarchy from `src/core/exceptions.py`
+- Uniqueness / cross-entity invariants → DB constraint + `src/repositories/error_mapping.py`; service pre-checks are UX only
+- DTOs are validation-free containers — never add validators or business rules to DTOs
+
 ---
 
 # Service Layer DTO Pattern (CRUD Rule)
