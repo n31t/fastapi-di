@@ -437,13 +437,13 @@ Expected: 85 passed, 0 failed (75 pre-existing tests unchanged and green — `te
 
 - [ ] **Step 2: Confirm no private validator names remain**
 
-Run: `grep -rn "_max_72_bytes\|_check_complexity" src/ tests/`
-Expected: no output (the private names are gone; only the public `validate_*` names exist)
+Run: `grep -rnw "_max_72_bytes\|_check_complexity" src/ tests/`
+Expected: no output, exit code 1 (the private names are gone; `-w` is required so the new public `validate_utf8_max_72_bytes` doesn't substring-match)
 
 - [ ] **Step 3: Confirm no schema declares its own `model_config` for extra/from_attributes**
 
 Run: `grep -rn "model_config" src/api/v1/schemas/`
-Expected: no output (all config now inherited from `src/core/schemas.py` bases)
+Expected: no output, exit code 1 (all config now inherited from `src/core/schemas.py` bases)
 
 ## Out of scope (from the spec)
 
