@@ -21,3 +21,8 @@ jwt_imp.md
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Working docs (specs/plans are session artifacts, not boilerplate content)
+docs/specs/
+docs/plans/
+docs/deprecated/
